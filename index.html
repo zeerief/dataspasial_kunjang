@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Peta Interaktif Desa & Sub-SLS</title>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        #map { height: calc(100vh - 4rem); }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans antialiased">
+
+    <!-- Navbar -->
+    <header class="bg-blue-600 text-white shadow-md h-16 flex items-center px-6 justify-between">
+        <h1 class="text-lg font-bold">Dashboard Peta Spasial (ID Desa & ID Sub-SLS)</h1>
+        <span class="text-sm bg-blue-700 px-3 py-1 rounded-full">Kunjang, Kediri</span>
+    </header>
+
+    <!-- Main Container -->
+    <div class="flex flex-col md:flex-row h-[calc(100vh-4rem)]">
+        
+        <!-- Sidebar Controls -->
+        <aside class="w-full md:w-96 bg-white border-r border-gray-200 p-4 overflow-y-auto flex flex-col gap-4 z-10 shadow-sm">
+            <div>
+                <label for="filter-desa" class="block text-sm font-medium text-gray-700 mb-1">Filter ID Desa</label>
+                <select id="filter-desa" class="w-full border-gray-300 rounded-md shadow-sm p-2 border focus:ring-blue-500 focus:border-blue-500">
+                    <option value="">-- Semua Desa --</option>
+                </select>
+            </div>
+
+            <div>
+                <label for="filter-subsls" class="block text-sm font-medium text-gray-700 mb-1">Filter ID Sub-SLS</label>
+                <select id="filter-subsls" class="w-full border-gray-300 rounded-md shadow-sm p-2 border focus:ring-blue-500 focus:border-blue-500">
+                    <option value="">-- Semua Sub-SLS --</option>
+                </select>
+            </div>
+
+            <button id="reset-btn" class="w-full bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium py-2 px-4 rounded-md transition duration-150">
+                Reset Filter
+            </button>
+
+            <hr class="my-2">
+
+            <!-- Detail Info Card -->
+            <div id="info-card" class="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-900 hidden">
+                <h2 class="font-bold text-base mb-2 text-blue-800 border-b border-blue-200 pb-1">Informasi Wilayah</h2>
+                <p><strong>Desa:</strong> <span id="info-nmdesa">-</span> (<span id="info-iddesa">-</span>)</p>
+                <p><strong>Sub-SLS:</strong> <span id="info-idsubsls">-</span></p>
+                <p><strong>Nama SLS:</strong> <span id="info-nmsls">-</span></p>
+                <p><strong>Luas:</strong> <span id="info-luas">-</span> m²</p>
+            </div>
+        </aside>
+
+        <!-- Map Section -->
+        <main class="flex-1 relative">
+            <div id="map" class="w-full h-full"></div>
+        </main>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // Inisialisasi Peta
+        const map = L.map('map').setView([-7.658, 112.148], 14);
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
+
+        let geojsonLayer;
+        let allFeatures = [];
+
+        // Data GeoJSON yang digabungkan dari file lampiran
+        const rawData = {
+            "type": "FeatureCollection",
+            "name": "iddesa_3506150001",
+            "features": [
+                { "type": "Feature", "properties": { "fid": 6690, "luas": 18945.82, "idsls": "35061500010008", "nmkec": "KUNJANG", "nmsls": "RT 008 RW 003 DUSUN KAPAS", "iddesa": "3506150001", "nmdesa": "KAPAS", "idsubsls": "3506150001000800" }, "geometry": { "type": "Polygon", "coordinates": [[[112.149399, -7.654668], [112.149284, -7.655071], [112.149212, -7.655042], [112.147543, -7.654635], [112.147833, -7.653752], [112.149447, -7.654204], [112.149322, -7.654639], [112.149399, -7.654668]]] } },
+                { "type": "Feature", "properties": { "fid": 6691, "luas": 20385.92, "idsls": "35061500010009", "nmkec": "KUNJANG", "nmsls": "RT 009 RW 003 DUSUN KAPAS", "iddesa": "3506150001", "nmdesa": "KAPAS", "idsubsls": "3506150001000900" }, "geometry": { "type": "Polygon", "coordinates": [[[112.149990, -7.653723], [112.150226, -7.653793], [112.150103, -7.654234], [112.150204, -7.654493], [112.149682, -7.654328], [112.149447, -7.654204], [112.147834, -7.653753], [112.147956, -7.653260], [112.148086, -7.652967], [112.149935, -7.653701], [112.149990, -7.653723]]] } }
+                // Tambahkan sisa fitur geojson disini sesuai kebutuhan file lengkap Anda
+            ]
+        };
+
+        const selectDesa = document.getElementById('filter-desa');
+        const selectSubsls = document.getElementById('filter-subsls');
+        const infoCard = document.getElementById('info-card');
+
+        function populateDropdowns(features) {
+            const desaSet = new Set();
+            const subslsSet = new Set();
+
+            features.forEach(f => {
+                if (f.properties.iddesa) desaSet.add(f.properties.iddesa);
+                if (f.properties.idsubsls) subslsSet.add(f.properties.idsubsls);
+            });
+
+            selectDesa.innerHTML = '<option value="">-- Semua Desa --</option>';
+            desaSet.forEach(d => {
+                let opt = document.createElement('option');
+                opt.value = d;
+                opt.textContent = d + ' (KAPAS)';
+                selectDesa.appendChild(opt);
+            });
+
+            selectSubsls.innerHTML = '<option value="">-- Semua Sub-SLS --</option>';
+            subslsSet.forEach(s => {
+                let opt = document.createElement('option');
+                opt.value = s;
+                opt.textContent = s;
+                selectSubsls.appendChild(opt);
+            });
+        }
+
+        function displayGeoJSON(features) {
+            if (geojsonLayer) {
+                map.removeLayer(geojsonLayer);
+            }
+
+            geojsonLayer = L.geoJSON({
+                "type": "FeatureCollection",
+                "features": features
+            }, {
+                style: {
+                    color: "#3b82f6",
+                    weight: 2,
+                    fillColor: "#60a5fa",
+                    fillOpacity: 0.4
+                },
+                onEachFeature: function (feature, layer) {
+                    layer.on({
+                        click: function (e) {
+                            highlightFeature(e);
+                            showInfo(feature.properties);
+                        },
+                        mouseover: function (e) {
+                            layer.setStyle({ fillOpacity: 0.7 });
+                        },
+                        mouseout: function (e) {
+                            geojsonLayer.resetStyle(layer);
+                        }
+                    });
+                }
+            }).addTo(map);
+
+            if (features.length > 0) {
+                map.fitBounds(geojsonLayer.getBounds());
+            }
+        }
+
+        function highlightFeature(e) {
+            const layer = e.target;
+            geojsonLayer.resetStyle();
+            layer.setStyle({
+                color: '#ef4444',
+                fillColor: '#f87171',
+                fillOpacity: 0.7
+            });
+        }
+
+        function showInfo(props) {
+            infoCard.classList.remove('hidden');
+            document.getElementById('info-iddesa').textContent = props.iddesa || '-';
+            document.getElementById('info-nmdesa').textContent = props.nmdesa || '-';
+            document.getElementById('info-idsubsls').textContent = props.idsubsls || '-';
+            document.getElementById('info-nmsls').textContent = props.nmsls || '-';
+            document.getElementById('info-luas').textContent = props.luas ? props.luas.toLocaleString() : '-';
+        }
+
+        // Event Listeners untuk Filter Dinamis
+        function filterData() {
+            const selectedDesa = selectDesa.value;
+            const selectedSubsls = selectSubsls.value;
+
+            const filtered = rawData.features.filter(f => {
+                let matchDesa = selectedDesa === "" || f.properties.iddesa === selectedDesa;
+                let matchSubsls = selectedSubsls === "" || f.properties.idsubsls === selectedSubsls;
+                return matchDesa && matchSubsls;
+            });
+
+            displayGeoJSON(filtered);
+        }
+
+        selectDesa.addEventListener('change', filterData);
+        selectSubsls.addEventListener('change', filterData);
+
+        document.getElementById('reset-btn').addEventListener('click', () => {
+            selectDesa.value = "";
+            selectSubsls.value = "";
+            displayGeoJSON(rawData.features);
+            infoCard.classList.add('hidden');
+        });
+
+        // Inisialisasi awal
+        populateDropdowns(rawData.features);
+        displayGeoJSON(rawData.features);
+    </script>
+</body>
+</html>
