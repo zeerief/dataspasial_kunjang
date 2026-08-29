@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Peta Interaktif ID Desa & ID Sub SLS</title>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            height: 100vh;
+            background-color: #f4f4f9;
+        }
+        #sidebar {
+            width: 350px;
+            background: #ffffff;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+            padding: 20px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            z-index: 1000;
+        }
+        #map {
+            flex-grow: 1;
+            height: 100%;
+        }
+        h2 {
+            font-size: 1.2rem;
+            color: #333;
+            margin-top: 0;
+        }
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        label {
+            font-weight: bold;
+            font-size: 0.9rem;
+            color: #555;
+        }
+        select {
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 0.9rem;
+        }
+        #info-box {
+            background: #eef2f7;
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            color: #333;
+            max-height: 250px;
+            overflow-y: auto;
+        }
+        .info-item {
+            margin-bottom: 6px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="sidebar">
+        <h2>Filter Lokasi Spasial</h2>
+        
+        <div class="form-group">
+            <label for="select-iddesa">Pilih ID Desa:</label>
+            <select id="select-iddesa">
+                <option value="">-- Pilih ID Desa --</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="select-idsubsls">Pilih ID Sub SLS:</label>
+            <select id="select-idsubsls" disabled>
+                <option value="">-- Pilih ID Sub SLS --</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label>Detail Atribut Wilayah:</label>
+            <div id="info-box">
+                <em>Pilih ID Sub SLS untuk menampilkan detail informasi wilayah.</em>
+            </div>
+        </div>
+    </div>
+
+    <div id="map"></div>
+
+    <!-- Leaflet JS & PapaParse for CSV parsing -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+
+    <script>
+        // Inisialisasi Peta
+        const map = L.map('map').setView([-7.655, 112.148], 14);
+
+        // Tambah Basemap OpenStreetMap
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(map);
+
+        let geojsonLayer;
+        let allData = [];
+
+        // Konfigurasi nama file CSV Anda
+        const CSV_URL = '150.csv';
+
+        // Load dan Parse CSV
+        Papa.parse(CSV_URL, {
+            download: true,
+            header: true,
+            dynamicTyping: true,
+            complete: function(results) {
+                allData = results.data.filter(row => row.iddesa && row.idsubsls);
+                populateDesaDropdown();
+            },
+            error: function(err) {
+                alert("Gagal memuat file CSV. Pastikan file '150.csv' berada pada folder yang sama.");
+                console.error(err);
+            }
+        });
+
+        const selectDesa = document.getElementById('select-iddesa');
+        const selectSubsls = document.getElementById('select-idsubsls');
+        const infoBox = document.getElementById('info-box');
+
+        function populateDesaDropdown() {
+            const uniqueDesa = [...new Set(allData.map(item => item.iddesa))];
+            
+            uniqueDesa.forEach(iddesa => {
+                const sample = allData.find(d => d.iddesa === iddesa);
+                const opt = document.createElement('option');
+                opt.value = iddesa;
+                opt.textContent = `${iddesa} - ${sample ? sample.nmdesa : ''}`;
+                selectDesa.appendChild(opt);
+            });
+        }
+
+        selectDesa.addEventListener('change', function() {
+            const selectedDesa = this.value;
+            selectSubsls.innerHTML = '<option value="">-- Pilih ID Sub SLS --</option>';
+            selectSubsls.disabled = true;
+            infoBox.innerHTML = '<em>Pilih ID Sub SLS untuk menampilkan detail informasi wilayah.</em>';
+
+            if (geojsonLayer) {
+                map.removeLayer(geojsonLayer);
+            }
+
+            if (!selectedDesa) return;
+
+            // Filter Sub SLS berdasarkan Desa yang dipilih
+            const filteredSubsls = allData.filter(item => item.iddesa == selectedDesa);
+            
+            filteredSubsls.forEach(item => {
+                const opt = document.createElement('option');
+                opt.value = item.idsubsls;
+                opt.textContent = `${item.idsubsls} (${item.nmsls || 'Tanpa Nama SLS'})`;
+                selectSubsls.appendChild(opt);
+            });
+            selectSubsls.disabled = false;
+
+            // Render GeoJSON berdasarkan data desa/subsls dari data terlampir
+            renderGeoJSON(selectedDesa, null);
+        });
+
+        selectSubsls.addEventListener('change', function() {
+            const selectedDesa = selectDesa.value;
+            const selectedSubsls = this.value;
+
+            if (!selectedSubsls) {
+                renderGeoJSON(selectedDesa, null);
+                infoBox.innerHTML = '<em>ID Sub SLS tidak dipilih. Menampilkan seluruh wilayah desa.</em>';
+                return;
+            }
+
+            // Cari data atribut berdasarkan idsubsls
+            const matchedData = allData.find(item => String(item.idsubsls) === String(selectedSubsls));
+            if (matchedData) {
+                let infoHtml = '';
+                for (const [key, val] of Object.entries(matchedData)) {
+                    infoHtml += `<div class="info-item"><strong>${key}:</strong> ${val !== null ? val : '-'}</div>`;
+                }
+                infoBox.innerHTML = infoHtml;
+            }
+
+            renderGeoJSON(selectedDesa, selectedSubsls);
+        });
+
+        function renderGeoJSON(iddesa, idsubsls) {
+            if (geojsonLayer) {
+                map.removeLayer(geojsonLayer);
+            }
+
+            // Menggunakan struktur data GeoJSON yang disertakan pada prompt
+            const rawFeatures = [
+            { "type": "Feature", "properties": { "fid": 6690, "kk": null, "gid": 0.0, "bstt": null, "luas": 18945.829721905204, "bsbtt": null, "idsls": "35061500010008", "kdkab": "06", "kdkec": "150", "kdsls": "0008", "nmkab": "KEDIRI", "nmkec": "KUNJANG", "nmsls": "RT 008 RW 003 DUSUN KAPAS", "bstt_k": null, "kddesa": "001", "kdprov": "35", "khusus": null, "muatan": null, "nmdesa": "KAPAS", "nmprov": "JAWA TIMUR", "posisi": null, "rw_dki": null, "segmen": null, "subsls": null, "sumber": null, "dom_sls": null, "periode": "2025_1", "tingkat": null, "idsubsls": "3506150001000800", "nm_gedung": null, "wil_campur": null, "iddesa": "3506150001", "kdsubsls": "00" }, "geometry": { "type": "MultiPolygon", "coordinates": [ [ [ [ 112.149399161000019, -7.65466807599995 ], [ 112.149284533000014, -7.655071765999935 ], [ 112.149212217000013, -7.655042348999928 ], [ 112.149213392000092, -7.655037727999968 ], [ 112.147543387000042, -7.654635526999925 ], [ 112.147543324000026, -7.654635416999952 ], [ 112.147833854000055, -7.65375290399993 ], [ 112.147834493, -7.65375308299997 ], [ 112.149447512000052, -7.654204342999947 ], [ 112.149446413000078, -7.654204058999937 ], [ 112.149322637000068, -7.654639964999944 ], [ 112.149399161000019, -7.65466807599995 ] ] ] ] } },
+            { "type": "Feature", "properties": { "fid": 6691, "kk": null, "gid": 0.0, "bstt": null, "luas": 20385.923309366586, "bsbtt": null, "idsls": "35061500010009", "kdkab": "06", "kdkec": "150", "kdsls": "0009", "nmkab": "KEDIRI", "nmkec": "KUNJANG", "nmsls": "RT 009 RW 003 DUSUN KAPAS", "bstt_k": null, "kddesa": "001", "kdprov": "35", "khusus": null, "muatan": null, "nmdesa": "KAPAS", "nmprov": "JAWA TIMUR", "posisi": null, "rw_dki": null, "segmen": null, "subsls": null, "sumber": null, "dom_sls": null, "periode": "2025_1", "tingkat": null, "idsubsls": "3506150001000900", "nm_gedung": null, "wil_campur": null, "iddesa": "3506150001", "kdsubsls": "00" }, "geometry": { "type": "MultiPolygon", "coordinates": [ [ [ [ 112.14999074800005, -7.653723955999965 ], [ 112.150063890000069, -7.65375298999993 ], [ 112.150226510000039, -7.653793429999951 ], [ 112.150103370000011, -7.654234129999963 ], [ 112.150090410000075, -7.654269769999928 ], [ 112.150109850000035, -7.654337819999967 ], [ 112.150132540000072, -7.654392909999956 ], [ 112.150168180000037, -7.654438269999957 ], [ 112.150210310000034, -7.65446419999995 ], [ 112.150204067, -7.65449306499994 ], [ 112.150203719000046, -7.654491879999966 ], [ 112.149682797000082, -7.654328817999954 ], [ 112.149709062000056, -7.654274098999963 ], [ 112.149447512000052, -7.654204342999947 ], [ 112.147834493, -7.65375308299997 ], [ 112.147956971000099, -7.653260982999939 ], [ 112.148086139000043, -7.652967943999954 ], [ 112.149935070000083, -7.653701849999948 ], [ 112.149936090000097, -7.653702259999932 ], [ 112.14999074800005, -7.653723955999965 ] ] ] ] } },
+            { "type": "Feature", "properties": { "fid": 6692, "kk": null, "gid": 0.0, "bstt": null, "luas": 27415.970265091273, "bsbtt": null, "idsls": "35061500010001", "kdkab": "06", "kdkec": "150", "kdsls": "0001", "nmkab": "KEDIRI", "nmkec": "KUNJANG", "nmsls": "RT 001 RW 001 DUSUN KAPAS", "bstt_k": null, "kddesa": "001", "kdprov": "35", "khusus": null, "muatan": null, "nmdesa": "KAPAS", "nmprov": "JAWA TIMUR", "posisi": null, "rw_dki": null, "segmen": null, "subsls": null, "sumber": null, "dom_sls": null, "periode": "2025_1", "tingkat": null, "idsubsls": "3506150001000100", "nm_gedung": null, "wil_campur": null, "iddesa": "3506150001", "kdsubsls": "00" }, "geometry": { "type": "MultiPolygon", "coordinates": [ [ [ [ 112.150693099000023, -7.656084162999946 ], [ 112.15073080500008, -7.656048575999932 ], [ 112.15073820900011, -7.656041587999937 ], [ 112.150923886000101, -7.656077893999964 ], [ 112.150912535000089, -7.656123297999955 ], [ 112.151286090000099, -7.656212063999931 ], [ 112.151276250000024, -7.656265029999929 ], [ 112.151169310000114, -7.656767 ], [ 112.15111945000001, -7.657001029999947 ], [ 112.151120330000026, -7.657001239999943 ], [ 112.151426740000034, -7.657075059999954 ], [ 112.151831470000047, -7.657172569999943 ], [ 112.151676622000082, -7.65777540299996 ], [ 112.150588391000042, -7.65754353899996 ], [ 112.149476508000021, -7.657307153999966 ], [ 112.149476785000047, -7.657305978999943 ], [ 112.149618064000038, -7.656706761999942 ], [ 112.149666929000091, -7.656499506999978 ], [ 112.149667468000075, -7.656499650999933 ], [ 112.150269928000057, -7.656660379999948 ], [ 112.150320269000076, -7.656591433999949 ], [ 112.150358573000062, -7.656562980999979 ], [ 112.150473482000052, -7.65604534199997 ], [ 112.150693099000023, -7.656084162999946 ] ] ] ] } },
+            { "type": "Feature", "properties": { "fid": 6693, "kk": null, "gid": 0.0, "bstt": null, "luas": 14963.548326531789, "bsbtt": null, "idsls": "35061500010002", "kdkab": "06", "kdkec": "150", "kdsls": "0002", "nmkab": "KEDIRI", "nmkec": "KUNJANG", "nmsls": "RT 002 RW 001 DUSUN KAPAS", "bstt_k": null, "kddesa": "001", "kdprov": "35", "khusus": null, "muatan": null, "nmdesa": "KAPAS", "nmprov": "JAWA TIMUR", "posisi": null, "rw_dki": null, "segmen": null, "subsls": null, "sumber": null, "dom_sls": null, "periode": "2025_1", "tingkat": null, "idsubsls": "3506150001000200", "nm_gedung": null, "wil_campur": null, "iddesa": "3506150001", "kdsubsls": "00" }, "geometry": { "type": "MultiPolygon", "coordinates": [ [ [ [ 112.150473482000052, -7.65604534199997 ], [ 112.150358573000062, -7.656562980999979 ], [ 112.150320269000076, -7.656591433999949 ], [ 112.150269928000057, -7.656660379999948 ], [ 112.149667468000075, -7.656499650999933 ], [ 112.149892863000105, -7.655644363999954 ], [ 112.149991958000101, -7.655268336999939 ], [ 112.150005090000036, -7.65518954199996 ], [ 112.150006383, -7.655189936999932 ], [ 112.150528200000053, -7.65534932099996 ], [ 112.150832309000066, -7.655387334999944 ], [ 112.150862535000101, -7.655280117999951 ], [ 112.151107962000083, -7.655316313999947 ], [ 112.1510772580001, -7.655417952999926 ], [ 112.151088519000041, -7.655419360999929 ], [ 112.150923886000101, -7.656077893999964 ], [ 112.15073820900011, -7.656041587999937 ], [ 112.15073080500008, -7.656048575999932 ], [ 112.150693099000023, -7.656084162999946 ], [ 112.150473482000052, -7.65604534199997 ] ] ] ] } }
+            ];
+
+            const filteredFeatures = rawFeatures.filter(f => {
+                const matchDesa = String(f.properties.iddesa) === String(iddesa);
+                const matchSubsls = idsubsls ? String(f.properties.idsubsls) === String(idsubsls) : true;
+                return matchDesa && matchSubsls;
+            });
+
+            const geojsonFeatureCollection = {
+                type: "FeatureCollection",
+                features: filteredFeatures
+            };
+
+            geojsonLayer = L.geoJSON(geojsonFeatureCollection, {
+                style: function(feature) {
+                    return {
+                        color: "#2c3e50",
+                        weight: 2,
+                        fillColor: idsubsls ? "#e74c3c" : "#3498db",
+                        fillOpacity: 0.5
+                    };
+                },
+                onEachFeature: function(feature, layer) {
+                    layer.bindPopup(`
+                        <strong>SLS:</strong> ${feature.properties.nmsls || '-'}<br>
+                        <strong>ID Sub SLS:</strong> ${feature.properties.idsubsls}<br>
+                        <strong>Desa:</strong> ${feature.properties.nmdesa}
+                    `);
+                }
+            }).addTo(map);
+
+            if (filteredFeatures.length > 0) {
+                map.fitBounds(geojsonLayer.getBounds(), { padding: [50, 50] });
+            }
+        }
+    </script>
+</body>
+</html>
